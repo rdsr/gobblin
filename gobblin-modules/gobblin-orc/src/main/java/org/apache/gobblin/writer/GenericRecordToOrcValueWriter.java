@@ -68,6 +68,7 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
   // A rough measure of how many times resize is triggered, helping on debugging and testing.
   @VisibleForTesting
   public int resizeCount = 0;
+  private int batchSize;
 
   /**
    * The interface for the conversion from GenericRecord to ORC's ColumnVectors.
@@ -101,6 +102,7 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
   public void write(GenericRecord value, VectorizedRowBatch output)
       throws IOException {
 
+    batchSize = output.getMaxSize();
     int row = output.size++;
     for (int c = 0; c < converters.length; ++c) {
       ColumnVector col = output.cols[c];
@@ -281,16 +283,12 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
 
   class ListConverter implements Converter {
     private final Converter children;
-    // Keep track of total number of rows being added to help calculate row's avg size.
-    private int rowsAdded;
 
     ListConverter(TypeDescription schema, Schema avroSchema) {
       children = buildConverter(schema.getChildren().get(0), avroSchema.getElementType());
-      rowsAdded = 0;
     }
 
     public void addValue(int rowId, int column, Object data, ColumnVector output) {
-      rowsAdded += 1;
       List value = (List) data;
       ListColumnVector cv = (ListColumnVector) output;
 
@@ -301,8 +299,7 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
       // make sure the child is big enough
       // If seeing child array being saturated, will need to expand with a reasonable amount.
       if (cv.childCount > cv.child.isNull.length) {
-        int resizedLength = resize(rowsAdded, cv.isNull.length, cv.childCount);
-        cv.child.ensureSize(resizedLength, true);
+        resize(cv.child, value.size());
       }
 
       // Add each element
@@ -343,9 +340,8 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
       cv.childCount += cv.lengths[rowId];
       // make sure the child is big enough
       if (cv.childCount > cv.keys.isNull.length) {
-        int resizedLength = resize(rowsAdded, cv.isNull.length, cv.childCount);
-        cv.keys.ensureSize(resizedLength, true);
-        cv.values.ensureSize(resizedLength, true);
+        resize(cv.keys, entries.size());
+        resize(cv.values, entries.size());
       }
       // Add each element
       int e = 0;
@@ -377,10 +373,14 @@ public class GenericRecordToOrcValueWriter implements OrcValueWriter<GenericReco
    * If there's further resize requested, it will add delta again to be conservative, but chances of adding delta
    * for multiple times should be low, unless the container size is fluctuating too much.
    */
-  private int resize(int rowsAdded, int batchSize, int currentSize) {
-    resizeCount += 1;
-    log.info(String.format("It has been resized %s times in current writer", resizeCount));
-    return enabledSmartSizing ? currentSize + (currentSize / rowsAdded + 1) * batchSize : enlargeFactor * currentSize;
+  private int resize(int batchSize, int requestedSize) {
+    return (int) Math.ceil(1.10 * batchSize * requestedSize);
+  }
+
+  private void resize(ColumnVector cv, int requestedSize) {
+    int sz = (int) batchSize * requestedSize;
+    log.info("col vec {} to be resized to {}. Requested size is {}. Batch size is {}", cv, sz, requestedSize, batchSize);
+    cv.ensureSize(sz, true);
   }
 
   private Converter buildConverter(TypeDescription schema, Schema avroSchema) {

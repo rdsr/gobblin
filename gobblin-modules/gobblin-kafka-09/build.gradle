@@ -86,8 +86,10 @@ artifacts {
 }
 
 test {
-  forkEvery = 1
+  //forkEvery = 1
   workingDir rootProject.rootDir
+  systemProperty "log4j.configuration", "file:///Users/rratti/code/li/gobblin/gobblin-modules/gobblin-kafka-09/src/test/resources/log4j.properties"
+  systemProperty "log4j.debug", "true"
   systemProperty "live.newtopic", System.getProperty("live.newtopic")
   systemProperty "live.newtopic.replicationCount", System.getProperty("live.newtopic.replicationCount")
   systemProperty "live.newtopic.partitionCount", System.getProperty("live.newtopic.partitionCount")

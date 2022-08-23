@@ -28,7 +28,7 @@ import org.testng.annotations.Test;
 
 public class KafkaStreamingLocalTest {
   //disable the test as streaming task will never end unless manually kill it
-  @Test(enabled=false)
+  @Test
   public void testStreamingLocally() {
     String eventBusId = this.getClass().getName() + ".jobFileTest";
 
